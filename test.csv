@@ -1,0 +1,30 @@
+,label
+selection,10
+gray peak 0 index,1
+gray peak 0 signal,1
+gray peak 1 index,2
+gray peak 1 signal,1
+gray peak 2 index,3
+gray peak 2 signal,1
+gray background signal,1
+red peak 0 index,1
+red peak 0 signal,2
+red peak 1 index,2
+red peak 1 signal,2
+red peak 2 index,3
+red peak 2 signal,2
+red background signal,2
+green peak 0 index,1
+green peak 0 signal,3
+green peak 1 index,2
+green peak 1 signal,3
+green peak 2 index,3
+green peak 2 signal,3
+green background signal,3
+blue peak 0 index,1
+blue peak 0 signal,4
+blue peak 1 index,2
+blue peak 1 signal,4
+blue peak 2 index,3
+blue peak 2 signal,4
+blue background signal,4

@@ -1,28 +1,27 @@
 import os
 import tkinter as tk
+import tkinter.ttk as ttk
+from ttkwidgets import TickScale
 from PIL import Image, ImageTk
 import pandas as pd
 from tkinter import Menu, Label, Toplevel, Entry, filedialog, Button, simpledialog, messagebox
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter,find_peaks
-PEAK_SPACING=50
-
 class popupWindow(object):
 
     value_global=""
-    def __init__(self,master):
+    def __init__(self, master):
         self.top=Toplevel(master)
         self.top.columnconfigure(0, weight=1)
         self.top.columnconfigure(1,weight=3)
         self.value=""
-        
+
         self.l=Label(self.top,text="Sample Label")
         self.l.grid(column=0,row=0,sticky=tk.W, padx=5, pady=5)
 
         self.e=Entry(self.top)
         self.e.grid(column=1, row=0, sticky=tk.E, padx=5, pady=5)
-
 
         self.b=Button(self.top,text='Ok',command=self.cleanup)
         self.b.grid(column=1, row=3, sticky=tk.E, padx=5, pady=5)
@@ -35,23 +34,42 @@ class popupWindow(object):
 class MousePositionTracker(tk.Frame):
     """ Tkinter Canvas mouse position widget. """
 
-    def __init__(self, canvas,root, peak_spacing=PEAK_SPACING):
+    def __init__(self, canvas, root):
         self.canvas = canvas
-        self.parent = root
-        self.canv_width = self.canvas.cget('width')
-        self.canv_height = self.canvas.cget('height')
+        self.root = root
+        self.width = self.canvas.winfo_width()
+        self.height = self.canvas.winfo_height()
         self.original_image = None
         self.count = 0
         self.n = 3
-        self.peak_spacing=peak_spacing
         self.reset()
+        self.scale_vals = []
+        self.spin_vals = []
+
+        # Options for areas outside rectanglar selection.
+        select_outside = dict(dash=(2, 2), fill='red', outline='', state=tk.HIDDEN, stipple='gray25')
+        # Separate options for area inside rectanglar selection.
+        select_inside = dict(dash=(2, 2), fill='', outline='white', state=tk.HIDDEN)
+        # Initial extrema of inner and outer rectangles.
+        i_min_x, i_min_y, i_max_x, i_max_y = 0, 0, 1, 1
+        o_min_x, o_min_y, o_max_x, o_max_y = 0, 0, self.width, self.height
+        self.rects = (
+            # Area *outside* selection (inner) rectangle.
+            self.canvas.create_rectangle(o_min_x, o_min_y,  o_max_x, i_min_y, **select_outside),
+            self.canvas.create_rectangle(o_min_x, i_min_y,  i_min_x, i_max_y, **select_outside),
+            self.canvas.create_rectangle(i_max_x, i_min_y,  o_max_x, i_max_y, **select_outside),
+            self.canvas.create_rectangle(o_min_x, i_max_y,  o_max_x, o_max_y, **select_outside),
+            # Inner rectangle.
+            self.canvas.create_rectangle(i_min_x, i_min_y,  i_max_x, i_max_y, **select_inside)
+        )
+
 
         self.df = pd.DataFrame()
 
         # Create canvas cross-hair lines.
         xhair_opts = dict(dash=(3, 2), fill='white', state=tk.HIDDEN)
-        self.lines = (self.canvas.create_line(0, 0, 0, self.canv_height, **xhair_opts),
-                      self.canvas.create_line(0, 0, self.canv_width,  0, **xhair_opts))
+        self.lines = (self.canvas.create_line(0, 0, 0, self.height, **xhair_opts),
+                      self.canvas.create_line(0, 0, self.width,  0, **xhair_opts))
 
     def cur_selection(self):
         return (self.start, self.end)
@@ -63,13 +81,31 @@ class MousePositionTracker(tk.Frame):
     def update(self, event):
         self.end = (event.x, event.y)
         self._update(event)
-        self._command(self.start, (event.x, event.y))  # User callback.
+        # Current extrema of inner and outer rectangles.
+        i_min_x, i_min_y,  i_max_x, i_max_y = self._get_coords()
+        o_min_x, o_min_y,  o_max_x, o_max_y = 0, 0,  self.width, self.height
+        # Update coords of all rectangles based on these extrema.
+        self.canvas.coords(self.rects[0], o_min_x, o_min_y,  o_max_x, i_min_y),
+        self.canvas.coords(self.rects[1], o_min_x, i_min_y,  i_min_x, i_max_y),
+        self.canvas.coords(self.rects[2], i_max_x, i_min_y,  o_max_x, i_max_y),
+        self.canvas.coords(self.rects[3], o_min_x, i_max_y,  o_max_x, o_max_y),
+        self.canvas.coords(self.rects[4], i_min_x, i_min_y,  i_max_x, i_max_y),
+
+        for rect in self.rects:  # Make sure all are now visible.
+            self.canvas.itemconfigure(rect, state=tk.NORMAL)
 
     def _update(self, event):
         # Update cross-hair lines.
-        self.canvas.coords(self.lines[0], event.x, 0, event.x, self.canv_height)
-        self.canvas.coords(self.lines[1], 0, event.y, self.canv_width, event.y)
+        self.canvas.coords(self.lines[0], event.x, 0, event.x, self.height)
+        self.canvas.coords(self.lines[1], 0, event.y, self.width, event.y)
         self.show()
+
+    def _get_coords(self):
+        """ Determine coords of a polygon defined by the start and
+            end points one of the diagonals of a rectangular area.
+        """
+        return (min((self.start[0], self.end[0])), min((self.start[1], self.end[1])),
+                max((self.start[0], self.end[0])), max((self.start[1], self.end[1])))
 
     def reset(self):
         self.start = self.end = None
@@ -77,15 +113,16 @@ class MousePositionTracker(tk.Frame):
     def hide(self):
         self.canvas.itemconfigure(self.lines[0], state=tk.HIDDEN)
         self.canvas.itemconfigure(self.lines[1], state=tk.HIDDEN)
+        for rect in self.rects:
+            self.canvas.itemconfigure(rect, state=tk.HIDDEN)
 
     def show(self):
         self.canvas.itemconfigure(self.lines[0], state=tk.NORMAL)
         self.canvas.itemconfigure(self.lines[1], state=tk.NORMAL)
 
-    def autodraw(self, command=lambda *args: None):
+    def autodraw(self):
         """Setup automatic drawing; supports command option"""
         self.reset()
-        self._command = command
         self.canvas.bind("<Button-1>", self.begin)
         self.canvas.bind("<B1-Motion>", self.update)
         self.canvas.bind("<ButtonRelease-1>", self.quit)
@@ -93,33 +130,38 @@ class MousePositionTracker(tk.Frame):
     def quit(self, event):
         self.count+=1
         self.sample_label = simpledialog.askstring("Input", "Sample label",
-                                        parent=self.parent, initialvalue=self.count)
+                                        parent=self.root, initialvalue=self.count)
         if self.sample_label:
-            try:
-                self.crop_ROI()
-                self.save_coordinates()
-            except Exception:
-                messagebox.showerror("Error", "Something is wrong. Please check if a valid image is loaded and/or a valid LFA region is selected")
-                return
+            self.crop_ROI()
+            self.save_coordinates()
+            # try:
+            #     self.crop_ROI()
+            #     self.save_coordinates()
+            # except Exception:
+            #     messagebox.showerror("Error", "Something is wrong. Please check if a valid image is loaded and/or a valid LFA region is selected")
+            #     return
         self.hide()  # Hide cross-hairs.
         self.reset()
 
     def crop_ROI(self):
-        left, top = [self.canvas.aspect*i for i in self.start]
-
-        right, bottom = [self.canvas.aspect*i for i in self.end]
+        # print(f'start:{self.start}\tend:{self.end}\taspect:{self.canvas.aspect}')
+        left, top = [i/self.canvas.aspect for i in self.start]
+        right, bottom = [i/self.canvas.aspect for i in self.end]
+        # print(f'L:{left}\tR:{right}\tT:{top}\tB:{bottom}')
+        # print(f'i_w:{self.original_image.width} x i_h:{self.original_image.height}')
         # try:
         # except AttributeError:
         #     messagebox.showerror("Error","Can't find image. Please open a valid image.")
         #     return
-        roi = self.original_image.crop((left,top,right,bottom))
+        roi = self.original_image.crop((left, top, right, bottom))
 
         roi_gray = roi.convert('L')
         nleft, nright = self.calculate_LR_border(roi_gray)
-        roi_tight_gray = roi_gray.crop((nleft, 0, nright,roi.size[1]))
-        roi_tight_color = roi.crop((nleft, 0, nright,roi.size[1]))
-        line_peaks = [self.find_lfa_peaks(cropped_roi) for cropped_roi in [roi_tight_gray]+list(roi_tight_color.split())]
-        
+        roi_tight_gray = roi_gray.crop((nleft, 0, nright, roi.size[1]))
+        roi_tight_color = roi.crop((nleft, 0, nright, roi.size[1]))
+        channel_lines = [255-np.mean(np.asarray(roi_channel),axis=1) for roi_channel in [roi_tight_gray]+list(roi_tight_color.split())]
+        line_peaks = [self.find_lfa_peaks(channel_line) for channel_line in channel_lines]
+
         file_title = self.file_label+'-'+str(self.count)+'-'+self.sample_label
         save_path = os.path.normpath(os.path.join(self.dir_name, self.file_label, file_title+'.png'))
         #roi_tight.save(save_path)
@@ -129,13 +171,29 @@ class MousePositionTracker(tk.Frame):
         color_channels = ['gray', 'red', 'green', 'blue']
         features = [f'peak {i}' for i in range(n_peaks)] + ['background']
         data_types = ['index', 'signal']
-        
+
         fig, axes = plt.subplots(nrows=1, ncols=1+n_channels, sharex=False, sharey=True)
-        
+
         fig.suptitle(file_title)
         axes[0].imshow(roi_tight_color, aspect='auto')
         axes[0].set_xticks([])
         axes[0].set_ylabel('distance (pixels)')
+        # for scale, spin in zip(self.scale_vals, self.spin_vals):
+        #     # vals = [(scale - top) * self.canvas.aspect,
+        #     #          min(scale - float(spin) - top, top) * self.canvas.aspect,
+        #     #          max(scale + float(spin) - top, top) * self.canvas.aspect
+        #     #        ]
+        #     vals = [scale,
+        #              scale - float(spin),
+        #              scale + float(spin)
+        #            ]
+        #     print(f'n:{app.n_lines.get()}')
+        #     print(f't:{top}, b:{bottom}, l:{left}, r:{right}')
+        #     print(f'ar:{self.canvas.aspect}')
+        #     for i, val in enumerate(vals):
+        #         if val > 0 or val < len(line_peaks[0][0]):
+        #             print(f'i:{i}, val:{val}')
+        #             axes[0].axhline(y = val, color = 'r' if i == 0 else 'k', linestyle = '-')
         for i in range(0, n_channels):
             axes[i+1].set_xlabel(f'{color_channels[i]} (signal)')
             axes[i+1].plot(line_peaks[i][0], range(0,len(line_peaks[i][0])), color_channels[i])
@@ -177,16 +235,13 @@ class MousePositionTracker(tk.Frame):
 
         return left, right
 
-    def find_lfa_peaks(self, cropped_image):
-
-        arr = np.asarray(cropped_image)
-        mean_horizontal=255-np.mean(arr,axis=1)
-        filtered=savgol_filter(mean_horizontal, 13, 2)
+    def find_lfa_peaks(self, line_profile):
+        filtered = savgol_filter(line_profile, 13, 2)
         # switch to returning peaks > 3*sd above background (= 50 lowest values)?
         lowest_length = np.clip(len(filtered)//2, 1, 50)-1
         lowest = np.sort(filtered)[0:lowest_length]
         background = np.mean(lowest) #+ 3*np.std(lowest)
-        peaks,_=find_peaks(filtered,distance=self.peak_spacing)
+        peaks,_=find_peaks(filtered)
         # peaks,_=find_peaks(filtered, threshold=3*np.std(lowest))
         peak_height=filtered[peaks]
         peak_index_sorted=np.argsort(peak_height)
@@ -213,9 +268,10 @@ class MousePositionTracker(tk.Frame):
         return filtered, peak_sort_by_location, peak_height_sorted_by_location
 
     def save_coordinates(self):
-        self.df.to_csv(self.csv_save_path, index=True)
-    def update_peak_threshold(self, peak_gap):
-        self.peak_spacing=peak_gap
+        try:
+            self.df.to_csv(self.csv_save_path, index=True)
+        except:
+            print('')    
 
     def update_data(self, image, filename):
         self.count = 0
@@ -228,171 +284,204 @@ class MousePositionTracker(tk.Frame):
         self.csv_save_path = os.path.normpath(os.path.join(self.dir_name, self.file_label, self.file_label+'.csv'))
         #self.save_folder=folder
 
-class SelectionObject:
-    """ Widget to display a rectangular area on given canvas defined by two points
-        representing its diagonal.
-    """
-    def __init__(self, canvas, select_opts):
-        # Create attributes needed to display selection.
-        self.canvas = canvas
-        self.select_opts1 = select_opts
-        self.width = self.canvas.cget('width')
-        self.height = self.canvas.cget('height')
+    def resize(self):
+        self.width = self.canvas.winfo_width()
+        self.height = self.canvas.winfo_height()
 
-        # Options for areas outside rectanglar selection.
-        select_opts1 = self.select_opts1.copy()  # Avoid modifying passed argument.
-        select_opts1.update(state=tk.HIDDEN)  # Hide initially.
-        # Separate options for area inside rectanglar selection.
-        select_opts2 = dict(dash=(2, 2), fill='', outline='white', state=tk.HIDDEN)
+    def update_scales(self, scale_vals, spin_vals):
+        self.scale_vals, self.spin_vals = scale_vals, spin_vals
 
-        # Initial extrema of inner and outer rectangles.
-        imin_x, imin_y,  imax_x, imax_y = 0, 0,  1, 1
-        omin_x, omin_y,  omax_x, omax_y = 0, 0,  self.width, self.height
-
-        self.rects = (
-            # Area *outside* selection (inner) rectangle.
-            self.canvas.create_rectangle(omin_x, omin_y,  omax_x, imin_y, **select_opts1),
-            self.canvas.create_rectangle(omin_x, imin_y,  imin_x, imax_y, **select_opts1),
-            self.canvas.create_rectangle(imax_x, imin_y,  omax_x, imax_y, **select_opts1),
-            self.canvas.create_rectangle(omin_x, imax_y,  omax_x, omax_y, **select_opts1),
-            # Inner rectangle.
-            self.canvas.create_rectangle(imin_x, imin_y,  imax_x, imax_y, **select_opts2)
-        )
-
-    def update(self, start, end):
-        # Current extrema of inner and outer rectangles.
-        imin_x, imin_y,  imax_x, imax_y = self._get_coords(start, end)
-        omin_x, omin_y,  omax_x, omax_y = 0, 0,  self.width, self.height
-
-        # Update coords of all rectangles based on these extrema.
-        self.canvas.coords(self.rects[0], omin_x, omin_y,  omax_x, imin_y),
-        self.canvas.coords(self.rects[1], omin_x, imin_y,  imin_x, imax_y),
-        self.canvas.coords(self.rects[2], imax_x, imin_y,  omax_x, imax_y),
-        self.canvas.coords(self.rects[3], omin_x, imax_y,  omax_x, omax_y),
-        self.canvas.coords(self.rects[4], imin_x, imin_y,  imax_x, imax_y),
-
-        for rect in self.rects:  # Make sure all are now visible.
-            self.canvas.itemconfigure(rect, state=tk.NORMAL)
-
-    def _get_coords(self, start, end):
-        """ Determine coords of a polygon defined by the start and
-            end points one of the diagonals of a rectangular area.
-        """
-        return (min((start[0], end[0])), min((start[1], end[1])),
-                max((start[0], end[0])), max((start[1], end[1])))
-
-    def hide(self):
-        for rect in self.rects:
-            self.canvas.itemconfigure(rect, state=tk.HIDDEN)
-
-class popupWindow(object):
-    def __init__(self,master):
-        top=self.top=Toplevel(master)
-        self.l=Label(top,text="Please input peak spacing value")
-        self.l.pack()
-        self.e=Entry(top)
-        self.e.pack(pady=10, padx=20)
-        self.b=Button(top,text='Ok',command=self.cleanup)
-        self.b.pack()
-    def cleanup(self):
-        txt=self.e.get()
-        if txt.isnumeric():
-            self.value=int(txt)
-        else:
-            self.value=PEAK_SPACING
-        self.top.destroy()
-
-class Application(tk.Frame):
-
-    # Default selection object options.
-    SELECT_OPTS = dict(dash=(2, 2), stipple='gray25', fill='red',
-                          outline='')
+class Application(tk.PanedWindow):
 
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
-        self.parent=parent
-        self.create_menu()
+        # self.parent = self._nametowidget(self.winfo_parent())
+        self.parent = self.master
+        # self.create_menu()
 
-        path = "./front.png"
-        # modify code to make image adjusted to window size
-        bgimg = Image.open(path)
-        self.img = ImageTk.PhotoImage(bgimg)
-        self.canvas = tk.Canvas(root, width=self.img.width(), height=self.img.height(),
-                                borderwidth=0, highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
+        self.controls = ttk.LabelFrame(self, text='Controls', padding=10, width=150)
+        self.add(self.controls, padx=10, pady=10)
+        self.images = ttk.LabelFrame(self, text='Image')
+        self.add(self.images, padx=10, pady=10)
 
-        self.img_container=self.canvas.create_image(0, 0, image=self.img, anchor=tk.NW)
-        self.canvas.img = self.img  # Keep reference.
-        self.canvas.aspect = 1
+        self.canvas = tk.Canvas(self.images)
+        self.canvas.aspect = 1.0
+        self.canvas.place(relheight=1.0, relwidth=1.0)
+        self.canvas.bind("<Configure>", self.resize_image)
 
-        # Create selection object to show current selection boundaries.
-        self.selection_obj = SelectionObject(self.canvas, self.SELECT_OPTS)
-        self.peak_spacing=PEAK_SPACING
-        self.original_img=None
-        self.file_name=None
-        # Callback function to update it given two points of its diagonal.
-
+        self.img_path = "./front.png"
+        self.img = Image.open(self.img_path)
+        self.img_tk = ImageTk.PhotoImage(self.img)
+        self.img_container=self.canvas.create_image(0, 0, image=self.img_tk, anchor=tk.NW)
 
         # Create mouse position tracker that uses the function.
-        self.posn_tracker = MousePositionTracker(self.canvas,parent, self.peak_spacing)
-        self.posn_tracker.autodraw(command=self.on_drag)  # Enable callbacks.
+        self.posn_tracker = MousePositionTracker(self.canvas, parent)
+        self.posn_tracker.autodraw()
         # self.button=Button(root, text='Save')
-        #
         # self.button.pack(expand=True)
-        #
+        MAX_LINES = 3
+        self.n_lines = tk.IntVar()
+        self.n_lines.set(MAX_LINES) # set default number of controls on this line
+        self.channel_selection = tk.IntVar()
+        self.channel_selection.set(1)
+        self.open = ttk.Button(self.controls,
+                               command=self.open_file,
+                               text='Open image file...')
+        self.analyze = ttk.Button(self.controls,
+                               command=self.auto_analysis,
+                               text='Start auto-analysis...')
+        self.channel_buttons = [ttk.Radiobutton(self.controls,
+                                                # command=self.update_channel_selection,
+                                                text=['red', 'green', 'blue', 'gray'][i]+' channel',
+                                                variable=self.channel_selection,
+                                                value=i+1)
+                                for i in range(4)]
+        self.line_buttons = [ttk.Radiobutton(self.controls,
+                                        command=self.update_line_selection,
+                                        text=f'{i+1}-line strip',
+                                        variable=self.n_lines,
+                                        value=i+1)
+                        for i in range(self.n_lines.get())]
+        self.entry_vals = [tk.StringVar(self,
+                                        'line '+str(i+1))
+                           for i in range(MAX_LINES)]
+        self.entries = [ttk.Entry(self.controls,
+                                  textvariable=self.entry_vals[i])
+                        for i in range(MAX_LINES)]
+        self.scale_vals = [tk.IntVar(self, 200+25*i) for i in range(MAX_LINES)]
+        self.scales = [TickScale(self.controls,
+                                 command=lambda value, index=i: self.update_scales(value, index),
+                                 variable=self.scale_vals[i],
+                                 from_=1,
+                                 orient=tk.VERTICAL,
+                                 to=self.img.height,
+                                 showvalue=True,
+                                 resolution=1,
+                                 length=100,
+                                 labelpos=tk.W)
+                       for i in range(MAX_LINES)]
+        self.scales_spinboxes = [ttk.Spinbox(self.controls,
+                                             command=lambda value=None, index=i: self.update_scales(value, index),
+                                            #  format='%d',
+                                             from_=1,
+                                             to=self.img.height,
+                                             textvariable=self.scale_vals[i],
+                                             width=5)
+                                 for i in range(MAX_LINES)]
+        self.spin_vals = [tk.StringVar(self, 15) for _ in range(MAX_LINES)]
+        self.spinboxes = [ttk.Spinbox(self.controls,
+                                      command=lambda value=None, index=i: self.update_scales(value, index),
+                                      from_=1,
+                                      to=100,
+                                      textvariable=self.spin_vals[i],
+                                      width=5)
+                          for i in range(MAX_LINES)]
+        self.lines = [self.canvas.create_line(0,
+                                              scale.get(),
+                                              self.canvas.winfo_width(),
+                                              scale.get())
+                      for scale in self.scales]
+        self.rectangles = [self.canvas.create_rectangle(0,
+                                                        max(0,
+                                                            self.scales[i].get() - float(self.spinboxes[i].get())),
+                                                        self.canvas.winfo_width(),
+                                                        min(self.canvas.winfo_height(),
+                                                            self.scales[i].get() + float(self.spinboxes[i].get())),
+                                                        fill='gray',
+                                                        stipple='gray25')
+                           for i in range(MAX_LINES)]
 
-    def on_drag(self, start, end, **kwarg):  # Must accept these arguments.
-        self.selection_obj.update(start, end)
+    def create_controls(self):
+        n = 0
+        self.open.grid(column=0, row=n, columnspan=2, sticky=tk.EW)
+        n += 1
+        self.analyze.grid(column=0, row=n, columnspan=2, sticky=tk.EW)
+        n += 1
+        ttk.Separator(self.controls, orient=tk.HORIZONTAL).grid(row=n, columnspan=2, sticky=tk.EW)
+        n += 1
+        [button.grid(column=0, row=n+i, columnspan=2, sticky=tk.W) for i, button in enumerate(self.channel_buttons)]
+        n += 1 + len(self.channel_buttons)
+        ttk.Separator(self.controls, orient=tk.HORIZONTAL).grid(row=n, columnspan=2, sticky=tk.EW)
+        n += 1
+        [button.grid(column=0, row=n+i, columnspan=2, sticky=tk.W) for i, button in enumerate(self.line_buttons)]
+        n = n + 1 + len(self.line_buttons)
+        ttk.Separator(self.controls, orient=tk.HORIZONTAL).grid(row=n, columnspan=2, sticky=tk.EW)
+        n += 1
+        [entry.grid(column=0, row=n+3*i, columnspan=2, sticky=tk.EW) for i, entry in enumerate(self.entries)]
+        n += 1
+        [scale_spinbox.grid(column=0, row=n+3*i, sticky=tk.NW) for i, scale_spinbox in enumerate(self.scales_spinboxes)]
+        [spinbox.grid(column=1, row=n+3*i, sticky=tk.NE) for i, spinbox in enumerate(self.spinboxes)]
+        [scale.grid(column=0, row=n+1+3*i, columnspan=2, sticky=tk.W) for i, scale in enumerate(self.scales)]
+            
+    def update_scales(self, val, i):
+        scale_val = float(self.scales[i].get())
+        spin_val = float(self.spinboxes[i].get())
+        self.canvas.coords(self.lines[i], 0, int(self.canvas.aspect * scale_val), self.canvas.winfo_width(), int(self.canvas.aspect * scale_val))
+        self.canvas.coords(self.rectangles[i],
+                            0,
+                            max(0, self.canvas.aspect * (scale_val - spin_val)),
+                            self.canvas.winfo_width(),
+                            min(self.canvas.winfo_height(), self.canvas.aspect * (scale_val + spin_val)))
+        self.posn_tracker.update_scales([v.get() for v in self.scales], [v.get() for v in self.spinboxes])
+        # print(f'{[v.get() for v in self.scales]}|{scale_val}|{float(self.scales[i].get())}')
 
-    def create_menu(self):
-        self.menu_bar = Menu(self.parent)
-        self.file_menu = Menu(self.menu_bar, tearoff=0)
-        self.file_menu.add_command(
-            label="Open...", command=self.open_file)
-        # add options to adjust peak spacings
-        self.file_menu.add_command(
-            label="Settings", command=self.adjust_settings)
+    def resize_image(self, event):  # Must accept these arguments.
+        c_w, i_w, c_h, i_h = self.canvas.winfo_width(), self.img.width, self.canvas.winfo_height(), self.img.height
+        self.canvas.aspect = c_w / i_w if c_w / i_w < c_h / i_h else c_h / i_h
+        self.img_tk = ImageTk.PhotoImage(self.img.resize((int(i_w * self.canvas.aspect), int(i_h * self.canvas.aspect)), Image.LANCZOS))
+        self.canvas.itemconfig(self.img_container, image=self.img_tk)
+        self.posn_tracker.resize()
+        [scale.configure(to=self.img.height) for scale in self.scales]
+        [scale_spinbox.configure(to=self.img.height) for scale_spinbox in self.scales_spinboxes]
 
-        self.menu_bar.add_cascade(label="File", menu=self.file_menu)
-        self.analysis_menu = Menu(self.menu_bar, tearoff=0)
-        self.analysis_menu.add_command(
-            label="Auto-analysis", command=self.auto_analysis)
-        self.menu_bar.add_cascade(label="Analysis", menu=self.analysis_menu)
+    # def start_drag(self, start, end, **kwarg):  # Must accept these arguments.
+    #     self.selection_obj.update(start, end)
 
-        self.parent.config(menu=self.menu_bar)
+    # def end_drag(self, **kwarg):
+    #     self.selection_obj.hide()
+
+    # def create_menu(self):
+    #     self.menu_bar = Menu(self.parent)
+    #     self.file_menu = Menu(self.menu_bar, tearoff=0)
+    #     self.file_menu.add_command(
+    #         label="Open...", command=self.open_file)
+    #     self.menu_bar.add_cascade(label="File", menu=self.file_menu)
+    #     self.analysis_menu = Menu(self.menu_bar, tearoff=0)
+    #     self.analysis_menu.add_command(
+    #         label="Auto-analysis", command=self.auto_analysis)
+    #     self.menu_bar.add_cascade(label="Analysis", menu=self.analysis_menu)
+
+    #     self.parent.config(menu=self.menu_bar)
+
+    def update_line_selection(self):
+        n = 7 + len(self.line_buttons) + len(self.channel_buttons)
+        [entry.grid_forget() for entry in self.entries]
+        [scale_spinbox.grid_forget() for scale_spinbox in self.scales_spinboxes]
+        [scale.grid_forget() for scale in self.scales]
+        [spinbox.grid_forget() for spinbox in self.spinboxes]
+        [self.entries[i].grid(column=0, row=n+3*i, columnspan=2) for i in range(self.n_lines.get())]
+        n += 1
+        [self.scales_spinboxes[i].grid(column=0, row=n+3*i) for i in range(self.n_lines.get())]
+        [self.spinboxes[i].grid(column=1, row=n+3*i) for i in range(self.n_lines.get())]
+        [self.scales[i].grid(column=0, row=n+1+3*i) for i in range(self.n_lines.get())]
 
     def open_file(self, event=None):
-        input_file_name = filedialog.askopenfilename(defaultextension=".txt",
+        self.img_path = filedialog.askopenfilename(defaultextension=".txt",
                                                              filetypes=[("Image files", "*.png"), ("Image files", "*.tif"), ("All Files", "*.*")])
-        if input_file_name:
-            global file_name
-            self.file_name = input_file_name
-            root.title(f'{os.path.basename(self.file_name)}')
-            img = Image.open(self.file_name)
-            img_w, img_h = img.size
-            canvas_w = self.canvas.winfo_width()
-            self.canvas.aspect = img_w / canvas_w
-            resized_img = img.resize((int(img_w / self.canvas.aspect), int(img_h / self.canvas.aspect)), Image.ANTIALIAS)
-            self.original_img=img
-            self.img = ImageTk.PhotoImage(resized_img)
-            self.canvas.itemconfig(self.img_container, image=self.img)
-            self.posn_tracker.update_data(self.original_img, self.file_name)
-
-    def adjust_settings(self):
-        self.settings_window=popupWindow(self.parent)
-        self.parent.wait_window(self.settings_window.top)
-        self.peak_spacing=self.settings_window.value
-        print(self.peak_spacing)
-        # Create mouse position tracker that uses the function.
-        self.posn_tracker.update_peak_threshold(self.peak_spacing)
+        print(f'{self.img_path}')
+        root.title(f'{os.path.basename(self.img_path)}')
+        self.img = Image.open(self.img_path)
+        self.resize_image(None)
+        [self.update_scales(None, i) for i in range(self.n_lines.get())]
+        self.posn_tracker.update_data(self.img, self.img_path)
 
     def auto_analysis(self, event=None):
-        if self.posn_tracker.original_image != None:
-            y_start = int(290/self.canvas.aspect)
-            y_end = int(430/self.canvas.aspect)
-            x_start = int(86/self.canvas.aspect)
-            x_end = int(self.posn_tracker.original_image.size[0]/self.canvas.aspect)
-            spacing = int(87/self.canvas.aspect)
+        if self.img != None:
+            y_start = int(290*self.canvas.aspect)
+            y_end = int(430*self.canvas.aspect)
+            x_start = int(86*self.canvas.aspect)
+            x_end = int(self.img.size[0]*self.canvas.aspect)
+            spacing = int(87*self.canvas.aspect)
             x_list = [pos for pos in range(x_start, x_end, spacing)]
             if x_list[-1] != x_end:
                 x_list = x_list+[x_end]
@@ -404,18 +493,14 @@ class Application(tk.Frame):
                 self.canvas.delete(rectangle)
 
 if __name__ == '__main__':
-
-    WIDTH, HEIGHT = 1500,750 #1568, 882
-    BACKGROUND = 'grey'
-    TITLE = 'Image Cropper'
-
-
     root = tk.Tk()
-    root.title(TITLE)
-    root.geometry('%sx%s' % (WIDTH, HEIGHT))
-    root.configure(background=BACKGROUND)
+    root.title('Image Cropper')
+    root.state('zoomed')
+    root.minsize(1372, 600)
 
+    app = Application(root, orient=tk.HORIZONTAL, sashwidth=5, name="app")
+    app.place(anchor=tk.NW, relwidth=1.0, relheight=1.0)
+    app.update()
+    app.create_controls()
 
-    app = Application(root, background=BACKGROUND)
-    app.pack(side=tk.TOP, fill=tk.BOTH, expand=tk.TRUE)
     app.mainloop()
