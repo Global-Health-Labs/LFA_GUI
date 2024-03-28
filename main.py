@@ -420,25 +420,25 @@ class Application(tk.PanedWindow):
         self.posn_tracker.update_data()
         # custom control settings for testing code on NAATOS strip images
         [self.line_name_vals[i].set(s) for i, s in enumerate(['TB', 'IPC', 'FC'])]
-        [self.line_vals[i].set(n) for i, n in enumerate([552, 502, 447])]
+        [self.line_vals[i].set(n) for i, n in enumerate([512, 462, 406])]
         [self.update_scales(None, i) for i in range(N)]
         [self.channel_listbox.selection_clear(i) for i in [1, 2, 3]]
 
     def auto_analysis(self, event=None):
         if self.img != None:
-            bottom = int(410*self.canvas.aspect)
-            top = int(600*self.canvas.aspect)
-            left = int(36*self.canvas.aspect)
+            bottom = int(380*self.canvas.aspect)
+            top = int(540*self.canvas.aspect)
+            left = int(30*self.canvas.aspect)
             right = int(110*self.canvas.aspect)
             last = int(self.img.size[0]*self.canvas.aspect)
-            spacing = int(28*self.canvas.aspect)
+            spacing = int(21*self.canvas.aspect)
             left_list = [pos for pos in range(left, last, right - left + spacing)]
             right_list = [pos for pos in range(right, last, right - left + spacing)]
             for L, R in zip(left_list, right_list):
                 if L < last:
                     self.posn_tracker.start = (L, bottom)
                     self.posn_tracker.end = (R, top)
-                    rectangle = self.canvas.create_rectangle(L, bottom, R, top)
+                    rectangle = self.canvas.create_rectangle(L, bottom, R, top, outline='red')
                     self.posn_tracker.quit(None)
                     self.canvas.delete(rectangle)
 
