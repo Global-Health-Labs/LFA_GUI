@@ -271,6 +271,8 @@ class Application(tk.PanedWindow):
         self.MAX_LINES = 4
         self.COLOR_CHANNELS = ['red', 'green', 'blue', 'gray']
 
+        self.auto_rectangles = []
+
         self.create_controls()
     
     def create_controls(self):
@@ -387,6 +389,8 @@ class Application(tk.PanedWindow):
         self.posn_tracker.resize()
         [self.line_scales[i].configure(to=self.img.height) for i in range(N)]
         [self.line_spinboxes[i].configure(to=self.img.height) for i in range(N)]
+        [self.canvas.delete(rectangle) for rectangle in self.auto_rectangles]
+        [self.update_scales(None, i) for i in range(N)]
 
     def update_line_selection(self, callback_name, callback_index, callback_method):
         if self.n_lines.get().isdigit():
@@ -419,26 +423,27 @@ class Application(tk.PanedWindow):
         [self.update_scales(None, i) for i in range(N)]
         self.posn_tracker.update_data()
         # custom control settings for testing code on NAATOS strip images
-        [self.line_name_vals[i].set(s) for i, s in enumerate(['TB', 'IPC', 'FC'])]
-        [self.line_vals[i].set(n) for i, n in enumerate([512, 462, 406])]
+        [self.line_name_vals[i].set(s) for i, s in enumerate(['FC', 'IPC', 'TB'])]
+        [self.line_vals[i].set(n) for i, n in enumerate([425, 485, 530])]
         [self.update_scales(None, i) for i in range(N)]
         [self.channel_listbox.selection_clear(i) for i in [1, 2, 3]]
 
     def auto_analysis(self, event=None):
         if self.img != None:
-            bottom = int(380*self.canvas.aspect)
-            top = int(540*self.canvas.aspect)
-            left = int(30*self.canvas.aspect)
-            right = int(110*self.canvas.aspect)
+            top = int(390*self.canvas.aspect)
+            bottom = int(560*self.canvas.aspect)
+            left = int(32*self.canvas.aspect)
+            right = int(120*self.canvas.aspect)
             last = int(self.img.size[0]*self.canvas.aspect)
-            spacing = int(21*self.canvas.aspect)
-            left_list = [pos for pos in range(left, last, right - left + spacing)]
-            right_list = [pos for pos in range(right, last, right - left + spacing)]
+            spacing = int(101*self.canvas.aspect)
+            left_list = [pos for pos in range(left, last, spacing)]
+            right_list = [pos for pos in range(right, last, spacing)]
+            self.auto_rectangles = [self.canvas.create_rectangle(L, top, R, bottom, outline='yellow') for L, R in zip(left_list, right_list)]
             for L, R in zip(left_list, right_list):
                 if L < last:
-                    self.posn_tracker.start = (L, bottom)
-                    self.posn_tracker.end = (R, top)
-                    rectangle = self.canvas.create_rectangle(L, bottom, R, top, outline='red')
+                    self.posn_tracker.start = (L, top)
+                    self.posn_tracker.end = (R, bottom)
+                    rectangle = self.canvas.create_rectangle(L, top, R, bottom, outline='red')
                     self.posn_tracker.quit(None)
                     self.canvas.delete(rectangle)
 
