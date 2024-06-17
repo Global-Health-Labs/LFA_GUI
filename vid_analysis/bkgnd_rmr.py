@@ -3,9 +3,11 @@
 import cv2
 import numpy as np
 import os
+from matplotlib import pyplot as plt
+from scipy.signal import savgol_filter,find_peaks
  
 # Open Video
-video_file = '20240531_113642.158.mp4'
+video_file = '20240531_114934.240.mp4'
 cap = cv2.VideoCapture(video_file)
  
 # Get the frame rate of the video
@@ -88,7 +90,7 @@ if last_frame is not None:
 cap2.release()
 
 #### DRAWING CONTOURS 
-# Read the image
+# Read image
 cap3 = cv2.imread(last_frame_pic)
 
 # convert the image to grayscale format
@@ -106,7 +108,14 @@ contours, _ = cv2.findContours(image=img_binarized, mode=cv2.RETR_TREE, method=c
 # Draw contours on the original image for `CHAIN_APPROX_SIMPLE`
 cv2.drawContours(cap3, contours, -1, (0, 255, 0), 2, cv2.LINE_AA)
 
-## Insert bounding rectangles
+# Save image
+contours_pic = os.path.join(new_dir, 'contours.jpg')
+cv2.imwrite(contours_pic, cap3)
+
+#### INSERT BOUNDING RECTANGLES
+# Read the image
+cap4 = cv2.imread(contours_pic)
+
 # Starting position for the first rectangle
 x_start = 128
 y_start = 309
@@ -116,11 +125,66 @@ y_end = 410
 num_rectangles = 8
 # Spacing between rectangles
 spacing = 234
+
+# Create a figure for histograms
+plt.figure(figsize=(15, 10))
+
+# Function to find LFA peaks
+def find_lfa_peaks(line_profile, top=0):
+    N = 3  # Assuming 3 lines for this example; adjust based on your needs
+    filtered = savgol_filter(line_profile, 3, 2)
+    lowest_length = np.clip(len(filtered) // 2, 1, 50) - 1
+    lowest = np.sort(filtered)[0:lowest_length]
+    background = np.mean(lowest)
+    peaks_X, _ = find_peaks(filtered)
+    peaks_Y = filtered[peaks_X]
+    
+    # Generate line_vals and interval_vals
+    line_vals = [top + 25, top + 50, top + 80]
+    interval_vals = [20, 20, 20]
+    
+    X_intervals = [[int(line - interval - top), int(line + interval - top)] for line, interval in zip(line_vals, interval_vals)]
+    peaks_XY_max = [max([[X, Y] for (X, Y) in zip(peaks_X, peaks_Y) if X >= a and X <= b], key=lambda x: x[1], default=[None, None]) for a, b in X_intervals]
+    peaks_XY_max.append([None, background])
+    
+    peaks_X_by_location, peaks_Y_by_location = zip(*peaks_XY_max)
+    return filtered, list(peaks_X_by_location), list(peaks_Y_by_location)
+
 for i in range(num_rectangles):
     # Calculate the position of the current rectangle
     x_offset = i * spacing
-    cv2.rectangle(cap3, (x_start + x_offset, y_end), (x_end + x_offset, y_start), (0, 0, 255), 3)
+    # Draw the rectangle
+    cv2.rectangle(cap4, (x_start + x_offset, y_start), (x_end + x_offset, y_end), (0, 0, 255), 1)
+    # Extract the region of interest (ROI)
+    roi = last_frame[y_start:y_end, x_start + x_offset:x_end + x_offset]
+    # Convert ROI to grayscale
+    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    # Calculate the mean pixel intensity along the vertical axis
+    line_profile = np.mean(roi_gray, axis=1)
+    # Find peaks in the line profile
+    filtered, peaks_X, peaks_Y = find_lfa_peaks(line_profile, top=y_start)
+    
+    # Plot the line profile and detected peaks
+    #plt.subplot(num_rectangles, 1, i + 1)
+    plt.plot(filtered, label='Filtered Line Profile')
+    plt.scatter(peaks_X, peaks_Y, color='red', label='Peaks')
+    plt.title(f'Rectangle {i + 1}')
+    plt.xlabel('Pixel')
+    plt.ylabel('Intensity')
+    #plt.legend()
 
-cv2.imwrite(f'./{new_dir}/contours.jpg', cap3)
+    # Save the plot
+    plot_filename = os.path.join(new_dir, f'rectangle_{i + 1}.png')
+    plt.savefig(plot_filename)
+    plt.close()
+
+
+# # Display the plots
+# plt.tight_layout()
+# plt.show()
+
+# Save image with rectangles
+rect_pic = os.path.join(new_dir, 'rect.jpg')
+cv2.imwrite(rect_pic, cap4)
 
 cv2.destroyAllWindows()
