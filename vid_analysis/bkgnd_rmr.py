@@ -3,13 +3,13 @@
 import cv2
 import numpy as np
 import os
-from matplotlib import pyplot as plt
-from scipy.signal import savgol_filter,find_peaks
- 
+from scipy.signal import savgol_filter, find_peaks
+import pandas as pd
+
 # Open Video
-video_file = '20240531_114934.240.mp4'
+video_file = '20240531_102227.542.mp4'
 cap = cv2.VideoCapture(video_file)
- 
+
 # Get the frame rate of the video
 fps = cap.get(cv2.CAP_PROP_FPS)
 
@@ -28,14 +28,13 @@ for fid in frameIds:
         frames.append(frame)
 
 # Calculate the median along the time axis
-medianFrame = np.median(frames, axis=0).astype(dtype=np.uint8)    
+medianFrame = np.median(frames, axis=0).astype(dtype=np.uint8)
 
 # Reset frame number to 0
 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
- 
+
 # Convert background to grayscale
 grayMedianFrame = cv2.cvtColor(medianFrame, cv2.COLOR_BGR2GRAY)
- 
 
 # Create output directory if it doesn't exist
 new_dir = os.path.splitext(video_file)[0]
@@ -47,75 +46,27 @@ output_video_path = os.path.join(new_dir, 'output.avi')
 out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'XVID'), 20.0, (int(cap.get(3)), int(cap.get(4))), False)
 
 # Loop over all frames
+all_frames = []
 while True:
+    # Read frame
+    ret, frame = cap.read()
+    if not ret:
+        break
 
-  # Read frame
-  ret, frame = cap.read()
-  if not ret:
-     break
-  
-  # Convert current frame to grayscale
-  gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-  # Calculate absolute difference of current frame and the median frame
-  dframe = cv2.absdiff(gray_frame, grayMedianFrame)
-  
-  # Display image
-  # cv2.imshow('frame', dframe)
-  # cv2.waitKey(20)
-  # Write Image
-  out.write(dframe)
+    # Convert current frame to grayscale
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # Calculate absolute difference of current frame and the median frame
+    dframe = cv2.absdiff(gray_frame, grayMedianFrame)
+    # Write Image
+    out.write(dframe)
+    # Store frame for further analysis
+    all_frames.append(dframe)
 
 # Release the video capture object
 cap.release()
 out.release()
 
-#### GETTING THE LAST FRAME
-cap2 = cv2.VideoCapture(output_video_path)
-
-# Extract last frame
-last_frame = None
-
-while cap2.isOpened():
-   ret, frame = cap2.read()
-   if not ret:
-      break
-   last_frame = frame
-
-# Save the last frame
-if last_frame is not None:
-    last_frame_pic = os.path.join(new_dir, 'last_frame.jpg')
-    cv2.imwrite(last_frame_pic, last_frame)
-
-# Release the output
-cap2.release()
-
-#### DRAWING CONTOURS 
-# Read image
-cap3 = cv2.imread(last_frame_pic)
-
-# convert the image to grayscale format
-img_gray = cv2.cvtColor(cap3, cv2.COLOR_BGR2GRAY)
-
-# Blur the image
-img_blurred = cv2.GaussianBlur(img_gray,(3,3),0)
-
-# Treshold to binarize
-_, img_binarized = cv2.threshold(img_blurred, 30, 255, cv2.THRESH_BINARY)
-
-# Detect the contours on the binary image
-contours, _ = cv2.findContours(image=img_binarized, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
-
-# Draw contours on the original image for `CHAIN_APPROX_SIMPLE`
-cv2.drawContours(cap3, contours, -1, (0, 255, 0), 2, cv2.LINE_AA)
-
-# Save image
-contours_pic = os.path.join(new_dir, 'contours.jpg')
-cv2.imwrite(contours_pic, cap3)
-
-#### INSERT BOUNDING RECTANGLES
-# Read the image
-cap4 = cv2.imread(contours_pic)
-
+#### DRAWING CONTOURS AND ANALYSIS ON ALL FRAMES
 # Starting position for the first rectangle
 x_start = 128
 y_start = 309
@@ -125,9 +76,6 @@ y_end = 410
 num_rectangles = 8
 # Spacing between rectangles
 spacing = 234
-
-# Create a figure for histograms
-plt.figure(figsize=(15, 10))
 
 # Function to find LFA peaks
 def find_lfa_peaks(line_profile, top=0):
@@ -150,41 +98,52 @@ def find_lfa_peaks(line_profile, top=0):
     peaks_X_by_location, peaks_Y_by_location = zip(*peaks_XY_max)
     return filtered, list(peaks_X_by_location), list(peaks_Y_by_location)
 
-for i in range(num_rectangles):
-    # Calculate the position of the current rectangle
-    x_offset = i * spacing
-    # Draw the rectangle
-    cv2.rectangle(cap4, (x_start + x_offset, y_start), (x_end + x_offset, y_end), (0, 0, 255), 1)
-    # Extract the region of interest (ROI)
-    roi = last_frame[y_start:y_end, x_start + x_offset:x_end + x_offset]
-    # Convert ROI to grayscale
-    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    # Calculate the mean pixel intensity along the vertical axis
-    line_profile = np.mean(roi_gray, axis=1)
-    # Find peaks in the line profile
-    filtered, peaks_X, peaks_Y = find_lfa_peaks(line_profile, top=y_start)
-    
-    # Plot the line profile and detected peaks
-    #plt.subplot(num_rectangles, 1, i + 1)
-    plt.plot(filtered, label='Filtered Line Profile')
-    plt.scatter(peaks_X, peaks_Y, color='red', label='Peaks')
-    plt.title(f'Rectangle {i + 1}')
-    plt.xlabel('Pixel')
-    plt.ylabel('Intensity')
-    #plt.legend()
+# Create an empty DataFrame to store the data points
+data_points = []
 
-    # Save the plot
-    plot_filename = os.path.join(new_dir, f'rectangle_{i + 1}.png')
-    plt.savefig(plot_filename)
-    plt.close()
+for frame_idx, frame in enumerate(all_frames):
+    # Add time in seconds for the current frame
+    time_in_seconds = frame_idx / fps
 
+    # Read image
+    img_gray = frame
 
-# # Display the plots
-# plt.tight_layout()
-# plt.show()
+    # Blur the image
+    img_blurred = cv2.GaussianBlur(img_gray, (3, 3), 0)
 
-# Save image with rectangles
-rect_pic = os.path.join(new_dir, 'rect.jpg')
-cv2.imwrite(rect_pic, cap4)
+    # Threshold to binarize
+    _, img_binarized = cv2.threshold(img_blurred, 30, 255, cv2.THRESH_BINARY)
+
+    # Detect the contours on the binary image
+    contours, _ = cv2.findContours(image=img_binarized, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
+
+    # Draw contours on the original image for `CHAIN_APPROX_SIMPLE`
+    cv2.drawContours(frame, contours, -1, (0, 255, 0), 2, cv2.LINE_AA)
+
+    for i in range(num_rectangles):
+        # Calculate the position of the current rectangle
+        x_offset = i * spacing
+        # Draw the rectangle
+        cv2.rectangle(frame, (x_start + x_offset, y_start), (x_end + x_offset, y_end), (0, 0, 255), 1)
+        # Extract the region of interest (ROI)
+        roi = frame[y_start:y_end, x_start + x_offset:x_end + x_offset]
+        # Calculate the mean pixel intensity along the vertical axis
+        line_profile = np.mean(roi, axis=1)
+        # Find peaks in the line profile
+        filtered, peaks_X, peaks_Y = find_lfa_peaks(line_profile, top=y_start)
+
+        # Collect all data points
+        for y in range(len(filtered)):
+            data_points.append({
+                'Time (s)': time_in_seconds,
+                'Rectangle': i + 1,
+                'Pixel': 100 - y,
+                'Intensity': filtered[y]
+            })
+
+# Save the collected data points to a CSV file
+df = pd.DataFrame(data_points)
+csv_file_path = os.path.join(new_dir, 'data_points.csv')
+df.to_csv(csv_file_path, index=False)
 
 cv2.destroyAllWindows()
